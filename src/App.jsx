@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { toPng } from "html-to-image";
-import LZString from "lz-string";
+import { supabase } from "./supabase";
+
 import Header from "./components/Header";
 import Hero from "./components/Hero";
 import PoemEditor from "./components/PoemEditor";
 import PoemPreview from "./components/PoemPreview";
+
 import "./App.css";
 
 const TITLE_KEY = "poeticVerseTitle";
@@ -14,54 +16,81 @@ function App() {
   const [title, setTitle] = useState("");
   const [poem, setPoem] = useState("");
   const [isSharedView, setIsSharedView] = useState(false);
+  const [isLoadingSharedPoem, setIsLoadingSharedPoem] = useState(false);
+  const [sharedPoemError, setSharedPoemError] = useState("");
 
   const sharedCardRef = useRef(null);
   const editorRef = useRef(null);
 
-  // Restore shared poem from URL, otherwise restore local saved poem
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sharedPoem = params.get("p");
+  // Check whether the current URL is a shared poem URL:
+  // /p/abc123
+  const pathParts = window.location.pathname
+    .split("/")
+    .filter(Boolean);
 
-    if (sharedPoem) {
-      try {
-        const decompressed = LZString.decompressFromEncodedURIComponent(sharedPoem);
-        const decoded = JSON.parse(decompressed);
-        
-        setTitle(decoded.title || "");
-        setPoem(decoded.poem || "");
+  const sharedPoemId =
+    pathParts[0] === "p" && pathParts[1]
+      ? pathParts[1]
+      : null;
+
+  // Load shared poem from Supabase,
+  // otherwise restore unfinished poem from localStorage
+  useEffect(() => {
+    const loadPoem = async () => {
+      if (sharedPoemId) {
         setIsSharedView(true);
+        setIsLoadingSharedPoem(true);
+
+        const { data, error } = await supabase
+          .from("poems")
+          .select("title, content")
+          .eq("id", sharedPoemId)
+          .single();
+
+        if (error || !data) {
+          console.error("Could not load shared poem:", error);
+          setSharedPoemError("This poem could not be found.");
+          setIsLoadingSharedPoem(false);
+          return;
+        }
+
+        setTitle(data.title || "");
+        setPoem(data.content || "");
+        setIsLoadingSharedPoem(false);
         return;
-      } catch (error) {
-        console.error("Could not open shared poem:", error);
       }
-    }
 
-    const savedTitle = localStorage.getItem(TITLE_KEY);
-    const savedPoem = localStorage.getItem(POEM_KEY);
+      const savedTitle =
+        localStorage.getItem(TITLE_KEY);
 
-    if (savedTitle) {
-      setTitle(savedTitle);
-    }
+      const savedPoem =
+        localStorage.getItem(POEM_KEY);
 
-    if (savedPoem) {
-      setPoem(savedPoem);
-    }
-  }, []);
+      if (savedTitle) {
+        setTitle(savedTitle);
+      }
 
-  // Autosave title
+      if (savedPoem) {
+        setPoem(savedPoem);
+      }
+    };
+
+    loadPoem();
+  }, [sharedPoemId]);
+
+  // Autosave title locally only when creating a poem
   useEffect(() => {
-    if (!isSharedView) {
+    if (!sharedPoemId) {
       localStorage.setItem(TITLE_KEY, title);
     }
-  }, [title, isSharedView]);
+  }, [title, sharedPoemId]);
 
-  // Autosave poem
+  // Autosave poem locally only when creating a poem
   useEffect(() => {
-    if (!isSharedView) {
+    if (!sharedPoemId) {
       localStorage.setItem(POEM_KEY, poem);
     }
-  }, [poem, isSharedView]);
+  }, [poem, sharedPoemId]);
 
   const handleClear = () => {
     setTitle("");
@@ -71,45 +100,73 @@ function App() {
     localStorage.removeItem(POEM_KEY);
   };
 
+  // Save poem to Supabase and generate short link
   const handleShare = async () => {
-  if (!title.trim() && !poem.trim()) {
-    alert("Write a poem before sharing.");
-    return;
-  }
+    if (!title.trim() && !poem.trim()) {
+      alert("Write a poem before sharing.");
+      return;
+    }
 
-  const poemData = {
-    title,
-    poem,
+    // Generate a short unique ID
+    const id = crypto.randomUUID()
+      .replace(/-/g, "")
+      .slice(0, 8);
+
+    const { error } = await supabase
+      .from("poems")
+      .insert([
+        {
+          id: id,
+          title: title,
+          content: poem,
+        },
+      ]);
+
+    if (error) {
+      console.error("Could not save poem:", error);
+
+      alert(
+        "Something went wrong while creating the share link."
+      );
+
+      return;
+    }
+
+    const shareUrl =
+      `${window.location.origin}/p/${id}`;
+
+    try {
+      await navigator.clipboard.writeText(
+        shareUrl
+      );
+
+      alert("Share link copied to clipboard!");
+    } catch {
+      window.prompt(
+        "Copy your poem link:",
+        shareUrl
+      );
+    }
   };
 
-  const compressedPoem = LZString.compressToEncodedURIComponent(
-    JSON.stringify(poemData)
-  );
-
-  const shareUrl =
-    `${window.location.origin}${window.location.pathname}?p=${compressedPoem}`;
-
-  try {
-    await navigator.clipboard.writeText(shareUrl);
-    alert("Share link copied to clipboard!");
-  } catch {
-    window.prompt("Copy your poem link:", shareUrl);
-  }
-};
-
+  // Download shared poem as PNG
   const handleDownload = async () => {
     if (!sharedCardRef.current) {
       return;
     }
 
     try {
-      const dataUrl = await toPng(sharedCardRef.current, {
-        quality: 1,
-        pixelRatio: 2,
-        backgroundColor: "#F3EFE9",
-      });
+      const dataUrl = await toPng(
+        sharedCardRef.current,
+        {
+          quality: 1,
+          pixelRatio: 2,
+          backgroundColor: "#F3EFE9",
+        }
+      );
 
-      const link = document.createElement("a");
+      const link =
+        document.createElement("a");
 
       const safeTitle =
         title
@@ -117,11 +174,16 @@ function App() {
           .replace(/[^a-z0-9]/gi, "-")
           .toLowerCase() || "poem";
 
-      link.download = `${safeTitle}-poetic-verse.png`;
+      link.download =
+        `${safeTitle}-poetic-verse.png`;
+
       link.href = dataUrl;
       link.click();
     } catch (error) {
-      console.error("Could not download poem:", error);
+      console.error(
+        "Could not download poem:",
+        error
+      );
 
       alert(
         "Something went wrong while creating the image."
@@ -135,34 +197,49 @@ function App() {
     });
   };
 
-  // Shared poem view
+  // -----------------------------
+  // SHARED POEM VIEW
+  // -----------------------------
+
   if (isSharedView) {
     return (
       <div className="page shared-page">
         <Header />
 
         <main className="shared-poem-view">
-          <p className="shared-label">
-            A poem shared with you
-          </p>
+          {isLoadingSharedPoem ? (
+            <p className="shared-label">
+              Opening your poem...
+            </p>
+          ) : sharedPoemError ? (
+            <p className="shared-label">
+              {sharedPoemError}
+            </p>
+          ) : (
+            <>
+              <p className="shared-label">
+                A poem shared with you
+              </p>
 
-          <div
-            className="shared-card-capture"
-            ref={sharedCardRef}
-          >
-            <PoemPreview
-              title={title}
-              poem={poem}
-            />
-          </div>
+              <div
+                className="shared-card-capture"
+                ref={sharedCardRef}
+              >
+                <PoemPreview
+                  title={title}
+                  poem={poem}
+                />
+              </div>
 
-          <button
-            className="btn btn-download"
-            onClick={handleDownload}
-            type="button"
-          >
-            Download as Image
-          </button>
+              <button
+                className="btn btn-download"
+                onClick={handleDownload}
+                type="button"
+              >
+                Download as Image
+              </button>
+            </>
+          )}
         </main>
 
         <footer className="site-footer">
@@ -174,7 +251,10 @@ function App() {
     );
   }
 
-  // Normal creator view
+  // -----------------------------
+  // CREATOR VIEW
+  // -----------------------------
+
   return (
     <div className="page">
       <Header />
