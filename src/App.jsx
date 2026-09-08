@@ -1,122 +1,212 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useState, useEffect, useRef } from "react";
+import { toPng } from "html-to-image";
+import LZString from "lz-string";
+import Header from "./components/Header";
+import Hero from "./components/Hero";
+import PoemEditor from "./components/PoemEditor";
+import PoemPreview from "./components/PoemPreview";
+import "./App.css";
+
+const TITLE_KEY = "poeticVerseTitle";
+const POEM_KEY = "poeticVersePoem";
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [title, setTitle] = useState("");
+  const [poem, setPoem] = useState("");
+  const [isSharedView, setIsSharedView] = useState(false);
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
+  const sharedCardRef = useRef(null);
+  const editorRef = useRef(null);
+
+  // Restore shared poem from URL, otherwise restore local saved poem
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedPoem = params.get("p");
+
+    if (sharedPoem) {
+      try {
+        const decompressed = LZString.decompressFromEncodedURIComponent(sharedPoem);
+        const decoded = JSON.parse(decompressed);
+        
+        setTitle(decoded.title || "");
+        setPoem(decoded.poem || "");
+        setIsSharedView(true);
+        return;
+      } catch (error) {
+        console.error("Could not open shared poem:", error);
+      }
+    }
+
+    const savedTitle = localStorage.getItem(TITLE_KEY);
+    const savedPoem = localStorage.getItem(POEM_KEY);
+
+    if (savedTitle) {
+      setTitle(savedTitle);
+    }
+
+    if (savedPoem) {
+      setPoem(savedPoem);
+    }
+  }, []);
+
+  // Autosave title
+  useEffect(() => {
+    if (!isSharedView) {
+      localStorage.setItem(TITLE_KEY, title);
+    }
+  }, [title, isSharedView]);
+
+  // Autosave poem
+  useEffect(() => {
+    if (!isSharedView) {
+      localStorage.setItem(POEM_KEY, poem);
+    }
+  }, [poem, isSharedView]);
+
+  const handleClear = () => {
+    setTitle("");
+    setPoem("");
+
+    localStorage.removeItem(TITLE_KEY);
+    localStorage.removeItem(POEM_KEY);
+  };
+
+  const handleShare = async () => {
+  if (!title.trim() && !poem.trim()) {
+    alert("Write a poem before sharing.");
+    return;
+  }
+
+  const poemData = {
+    title,
+    poem,
+  };
+
+  const compressedPoem = LZString.compressToEncodedURIComponent(
+    JSON.stringify(poemData)
+  );
+
+  const shareUrl =
+    `${window.location.origin}${window.location.pathname}?p=${compressedPoem}`;
+
+  try {
+    await navigator.clipboard.writeText(shareUrl);
+    alert("Share link copied to clipboard!");
+  } catch {
+    window.prompt("Copy your poem link:", shareUrl);
+  }
+};
+
+  const handleDownload = async () => {
+    if (!sharedCardRef.current) {
+      return;
+    }
+
+    try {
+      const dataUrl = await toPng(sharedCardRef.current, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: "#F3EFE9",
+      });
+
+      const link = document.createElement("a");
+
+      const safeTitle =
+        title
+          .trim()
+          .replace(/[^a-z0-9]/gi, "-")
+          .toLowerCase() || "poem";
+
+      link.download = `${safeTitle}-poetic-verse.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (error) {
+      console.error("Could not download poem:", error);
+
+      alert(
+        "Something went wrong while creating the image."
+      );
+    }
+  };
+
+  const scrollToEditor = () => {
+    editorRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  };
+
+  // Shared poem view
+  if (isSharedView) {
+    return (
+      <div className="page shared-page">
+        <Header />
+
+        <main className="shared-poem-view">
+          <p className="shared-label">
+            A poem shared with you
           </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+          <div
+            className="shared-card-capture"
+            ref={sharedCardRef}
+          >
+            <PoemPreview
+              title={title}
+              poem={poem}
+            />
+          </div>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+          <button
+            className="btn btn-download"
+            onClick={handleDownload}
+            type="button"
+          >
+            Download as Image
+          </button>
+        </main>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+        <footer className="site-footer">
+          <p>
+            Poetic Verse — crafted by Emba
+          </p>
+        </footer>
+      </div>
+    );
+  }
+
+  // Normal creator view
+  return (
+    <div className="page">
+      <Header />
+
+      <Hero onStart={scrollToEditor} />
+
+      <div
+        className="workspace"
+        ref={editorRef}
+      >
+        <PoemEditor
+          title={title}
+          poem={poem}
+          onTitleChange={setTitle}
+          onPoemChange={setPoem}
+          onClear={handleClear}
+          onShare={handleShare}
+        />
+
+        <PoemPreview
+          title={title}
+          poem={poem}
+        />
+      </div>
+
+      <footer className="site-footer">
+        <p>
+          Poetic Verse — crafted by Emba
+        </p>
+      </footer>
+    </div>
+  );
 }
 
-export default App
+export default App;
