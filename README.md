@@ -2,7 +2,7 @@
 
 Poetic Verse is a simple web application for creating, previewing, sharing, and downloading poems.
 
-The project was designed as a lightweight poetry-sharing experience with a vintage-inspired visual style. Users can write a poem without creating an account, temporarily save their work in their browser, and generate a shareable link that allows another person to view the finished poem.
+The project was designed as a lightweight poetry-sharing experience with a vintage-inspired visual style. Users can write a poem without creating an account, temporarily save their work in their browser, and generate a shareable link that allows another person to view the finished poem. It can be accessed at: poetic-verses.vercel.app
 
 ##  Features
 
